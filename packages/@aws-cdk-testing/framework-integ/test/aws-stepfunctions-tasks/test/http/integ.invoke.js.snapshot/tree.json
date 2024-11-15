@@ -630,7 +630,7 @@
                           {
                             "Ref": "AWS::Partition"
                           },
-                          ":states:::http:invoke\",\"Parameters\":{\"ApiEndpoint\":\"https://",
+                          ":states:::http:invoke\",\"Parameters\":{\"ApiEndpoint.$\":\"States.Format('{}/{}', 'https://",
                           {
                             "Ref": "IntegRestApiF8B59B0D"
                           },
@@ -646,7 +646,7 @@
                           {
                             "Ref": "IntegRestApiDeploymentStageprod29E2686A"
                           },
-                          "///test\",\"Authentication\":{\"ConnectionArn\":\"",
+                          "/', '/test')\",\"Authentication\":{\"ConnectionArn\":\"",
                           {
                             "Fn::GetAtt": [
                               "Connection07624BCD",
@@ -691,7 +691,7 @@
             },
             "constructInfo": {
               "fqn": "constructs.Construct",
-              "version": "10.3.0"
+              "version": "10.4.2"
             }
           },
           "BootstrapVersion": {
@@ -729,7 +729,7 @@
                 "path": "HttpInvokeTest/DefaultTest/Default",
                 "constructInfo": {
                   "fqn": "constructs.Construct",
-                  "version": "10.3.0"
+                  "version": "10.4.2"
                 }
               },
               "DeployAssert": {
@@ -749,7 +749,7 @@
                             "path": "HttpInvokeTest/DefaultTest/DeployAssert/AwsApiCallStepFunctionsstartExecutionc5cc0786542148808c24d8ebf111c7aa/SdkProvider/AssertionsProvider",
                             "constructInfo": {
                               "fqn": "constructs.Construct",
-                              "version": "10.3.0"
+                              "version": "10.4.2"
                             }
                           }
                         },
@@ -813,7 +813,15 @@
                     },
                     "constructInfo": {
                       "fqn": "constructs.Construct",
-                      "version": "10.3.0"
+                      "version": "10.4.2"
+                    }
+                  },
+                  "LatestNodeRuntimeMap": {
+                    "id": "LatestNodeRuntimeMap",
+                    "path": "HttpInvokeTest/DefaultTest/DeployAssert/LatestNodeRuntimeMap",
+                    "constructInfo": {
+                      "fqn": "aws-cdk-lib.CfnMapping",
+                      "version": "0.0.0"
                     }
                   },
                   "AwsApiCallStepFunctionsdescribeExecution7e7cfa5e3c60aef760b5fbff9448d868": {
@@ -829,7 +837,7 @@
                             "path": "HttpInvokeTest/DefaultTest/DeployAssert/AwsApiCallStepFunctionsdescribeExecution7e7cfa5e3c60aef760b5fbff9448d868/SdkProvider/AssertionsProvider",
                             "constructInfo": {
                               "fqn": "constructs.Construct",
-                              "version": "10.3.0"
+                              "version": "10.4.2"
                             }
                           }
                         },
@@ -909,7 +917,7 @@
         "path": "Tree",
         "constructInfo": {
           "fqn": "constructs.Construct",
-          "version": "10.3.0"
+          "version": "10.4.2"
         }
       }
     },
