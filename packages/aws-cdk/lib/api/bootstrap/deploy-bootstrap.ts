@@ -13,7 +13,7 @@ import {
 import * as logging from '../../logging';
 import type { SDK, SdkProvider } from '../aws-auth';
 import { assertIsSuccessfulDeployStackResult, deployStack, SuccessfulDeployStackResult } from '../deploy-stack';
-import { NoBootstrapStackEnvironmentResources } from '../environment-resources';
+import { EnvironmentAccess } from '../environment-access';
 import { Mode } from '../plugin';
 import { DEFAULT_TOOLKIT_STACK_NAME, ToolkitInfo } from '../toolkit-info';
 
@@ -123,11 +123,11 @@ export class BootstrapStack {
     });
 
     const assembly = builder.buildAssembly();
+    const env = await new EnvironmentAccess(this.sdkProvider, this.toolkitStackName).accessEnvironmentForBootstrapping(this.resolvedEnvironment);
 
     const ret = await deployStack({
       stack: assembly.getStackByName(this.toolkitStackName),
-      resolvedEnvironment: this.resolvedEnvironment,
-      sdk: this.sdk,
+      env,
       sdkProvider: this.sdkProvider,
       force: options.force,
       roleArn: options.roleArn,
@@ -135,8 +135,6 @@ export class BootstrapStack {
       deploymentMethod: { method: 'change-set', execute: options.execute },
       parameters,
       usePreviousParameters: options.usePreviousParameters ?? true,
-      // Obviously we can't need a bootstrap stack to deploy a bootstrap stack
-      envResources: new NoBootstrapStackEnvironmentResources(this.resolvedEnvironment, this.sdk),
     });
 
     assertIsSuccessfulDeployStackResult(ret);

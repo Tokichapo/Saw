@@ -2,7 +2,7 @@ import * as cxapi from '@aws-cdk/cx-api';
 import { SDK } from './aws-auth';
 import { warning } from '../logging';
 import { CredentialsOptions, SdkForEnvironment, SdkProvider } from './aws-auth/sdk-provider';
-import { EnvironmentResources, EnvironmentResourcesRegistry } from './environment-resources';
+import { EnvironmentResources, EnvironmentResourcesRegistry, NoBootstrapStackEnvironmentResources } from './environment-resources';
 import { Mode } from './plugin';
 import { replaceEnvPlaceholders, StringWithoutPlaceholders } from './util/placeholders';
 
@@ -28,6 +28,27 @@ export class EnvironmentAccess {
    */
   public async resolveStackEnvironment(stack: cxapi.CloudFormationStackArtifact): Promise<cxapi.Environment> {
     return this.sdkProvider.resolveEnvironment(stack.environment);
+  }
+
+  /**
+   * Get an SDK to access the given environment for bootstrapping
+   *
+   * Will ask plugins for readonly credentials if available, use the default
+   * AWS credentials if not.
+   *
+   * Will otherwise not assume any role.
+   */
+  public async accessEnvironmentForBootstrapping(env: cxapi.Environment): Promise<TargetEnvironment> {
+    const ret = await this.prepareSdk({
+      environment: env,
+      mode: Mode.ForWriting,
+    });
+
+    return {
+      ...ret,
+      // We can't need a bootstrap stack to bootstrap, so replace the instance with a specific one
+      resources: new NoBootstrapStackEnvironmentResources(ret.resolvedEnvironment, ret.sdk),
+    };
   }
 
   /**

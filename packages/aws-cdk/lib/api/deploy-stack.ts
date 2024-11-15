@@ -10,7 +10,7 @@ import type {
 import * as chalk from 'chalk';
 import * as uuid from 'uuid';
 import type { SDK, SdkProvider, ICloudFormationClient } from './aws-auth';
-import type { EnvironmentResources } from './environment-resources';
+import { TargetEnvironment } from './environment-access';
 import { CfnEvaluationException } from './evaluate-cloudformation-template';
 import { HotswapMode, HotswapPropertyOverrides, ICON } from './hotswap/common';
 import { tryHotswapDeployment } from './hotswap-deployments';
@@ -30,8 +30,7 @@ import {
 import { StackActivityMonitor, type StackActivityProgress } from './util/cloudformation/stack-activity-monitor';
 import { type TemplateBodyParameter, makeBodyParameter } from './util/template-body-parameter';
 import { AssetManifestBuilder } from '../util/asset-manifest-builder';
-import { determineAllowCrossAccountAssetPublishing } from './util/checks';
-import { publishAssets } from '../util/asset-publishing';
+import { iAmDeployStack, publishAssets } from '../util/asset-publishing';
 import { StringWithoutPlaceholders } from './util/placeholders';
 
 export type DeployStackResult =
@@ -73,19 +72,8 @@ export interface DeployStackOptions {
 
   /**
    * The environment to deploy this stack in
-   *
-   * The environment on the stack artifact may be unresolved, this one
-   * must be resolved.
    */
-  readonly resolvedEnvironment: cxapi.Environment;
-
-  /**
-   * The SDK to use for deploying the stack
-   *
-   * Should have been initialized with the correct role with which
-   * stack operations should be performed.
-   */
-  readonly sdk: SDK;
+  readonly env: TargetEnvironment;
 
   /**
    * SDK provider (seeded with default credentials)
@@ -99,11 +87,6 @@ export interface DeployStackOptions {
    * - Hotswap
    */
   readonly sdkProvider: SdkProvider;
-
-  /**
-   * Information about the bootstrap stack found in the target environment
-   */
-  readonly envResources: EnvironmentResources;
 
   /**
    * Role to pass to CloudFormation to execute the change set
@@ -238,7 +221,7 @@ export interface DeployStackOptions {
    *
    * @default - Use the stored template
    */
-  readonly overrideTemplate?: any;
+  readonly overrideTemplate?: unknown;
 
   /**
    * Whether to build/publish assets in parallel
@@ -273,11 +256,12 @@ export interface ChangeSetDeploymentMethod {
 
 export async function deployStack(options: DeployStackOptions): Promise<DeployStackResult> {
   const stackArtifact = options.stack;
+  const env = options.env;
 
-  const stackEnv = options.resolvedEnvironment;
+  const stackEnv = env.resolvedEnvironment;
 
-  options.sdk.appendCustomUserAgent(options.extraUserAgent);
-  const cfn = options.sdk.cloudFormation();
+  env.sdk.appendCustomUserAgent(options.extraUserAgent);
+  const cfn = env.sdk.cloudFormation();
   const deployName = options.deployName || stackArtifact.stackName;
   let cloudFormationStack = await CloudFormationStack.lookup(cfn, deployName);
 
@@ -302,12 +286,7 @@ export async function deployStack(options: DeployStackOptions): Promise<DeploySt
   // an ad-hoc asset manifest, while passing their locations via template
   // parameters.
   const legacyAssets = new AssetManifestBuilder();
-  const assetParams = await addMetadataAssetsToManifest(
-    stackArtifact,
-    legacyAssets,
-    options.envResources,
-    options.reuseAssets,
-  );
+  const assetParams = await addMetadataAssetsToManifest(stackArtifact, legacyAssets, env.resources, options.reuseAssets);
 
   const finalParameterValues = { ...options.parameters, ...assetParams };
 
@@ -339,22 +318,20 @@ export async function deployStack(options: DeployStackOptions): Promise<DeploySt
     debug(`${deployName}: deploying...`);
   }
 
-  const bodyParameter = await makeBodyParameter(
-    stackArtifact,
-    options.resolvedEnvironment,
-    legacyAssets,
-    options.envResources,
-    options.overrideTemplate,
-  );
-  let bootstrapStackName: string | undefined;
-  try {
-    bootstrapStackName = (await options.envResources.lookupToolkit()).stackName;
-  } catch (e) {
-    debug(`Could not determine the bootstrap stack name: ${e}`);
+  let bodyParameter;
+  const bodyAction = await makeBodyParameter(stackArtifact, env, iAmDeployStack(), options.overrideTemplate);
+  switch (bodyAction.type) {
+    case 'direct':
+      bodyParameter = bodyAction.param;
+      break;
+    case 'upload':
+      bodyParameter = bodyAction.addToManifest(legacyAssets);
+      break;
   }
+
   await publishAssets(legacyAssets.toManifest(stackArtifact.assembly.directory), options.sdkProvider, stackEnv, {
     parallel: options.assetParallelism,
-    allowCrossAccount: await determineAllowCrossAccountAssetPublishing(options.sdk, bootstrapStackName),
+    allowCrossAccount: await options.env.resources.allowCrossAccountAssetPublishing(),
   });
 
   if (hotswapMode !== HotswapMode.FULL_DEPLOYMENT) {
@@ -386,7 +363,7 @@ export async function deployStack(options: DeployStackOptions): Promise<DeploySt
 
     if (hotswapMode === HotswapMode.FALL_BACK) {
       print('Falling back to doing a full deployment');
-      options.sdk.appendCustomUserAgent('cdk-hotswap/fallback');
+      env.sdk.appendCustomUserAgent('cdk-hotswap/fallback');
     } else {
       return {
         type: 'did-deploy-stack',
@@ -432,7 +409,7 @@ class FullCloudFormationDeployment {
     private readonly stackParams: ParameterValues,
     private readonly bodyParameter: TemplateBodyParameter,
   ) {
-    this.cfn = options.sdk.cloudFormation();
+    this.cfn = options.env.sdk.cloudFormation();
     this.stackName = options.deployName ?? stackArtifact.stackName;
 
     this.update = cloudFormationStack.exists && cloudFormationStack.stackStatus.name !== 'REVIEW_IN_PROGRESS';

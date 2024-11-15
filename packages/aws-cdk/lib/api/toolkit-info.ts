@@ -103,6 +103,7 @@ export abstract class ToolkitInfo {
   public abstract readonly variant: string;
   public abstract readonly bootstrapStack: CloudFormationStack;
   public abstract readonly stackName: string;
+  public abstract readonly allowCrossAccountAssetPublishing: boolean;
 
   constructor() {}
 }
@@ -147,6 +148,35 @@ class ExistingToolkitInfo extends ToolkitInfo {
 
   public get stackName(): string {
     return this.bootstrapStack.stackName;
+  }
+
+  public get allowCrossAccountAssetPublishing(): boolean {
+    // try to get bucketname from the logical resource id. If there is no
+    // bucketname, or the value doesn't look like an S3 bucket name, we assume
+    // the bucket doesn't exist (this is for the case where a template customizer did
+    // not dare to remove the Output, but put a dummy value there like '' or '-' or '***').
+    //
+    // We would have preferred to look at the stack resources here, but
+    // unfortunately the deploy role doesn't have permissions call DescribeStackResources.
+    const bucketName: string | undefined = this.bootstrapStack.outputs[BUCKET_NAME_OUTPUT];
+    // Must begin and end with letter or number.
+    const hasStagingBucket = !!(bucketName && bucketName.match(/^[a-z0-9]/) && bucketName.match(/[a-z0-9]$/));
+
+    if (!hasStagingBucket) {
+      // indicates an intentional cross account setup
+      return true;
+    }
+
+    if (this.version >= 21) {
+      // bootstrap stack version 21 contains a fix that will prevent cross
+      // account publishing on the IAM level
+      // https://github.com/aws/aws-cdk/pull/30823
+      return true;
+    }
+
+    // If there is a staging bucket AND the bootstrap version is old, then we want to protect
+    // against accidental cross-account publishing.
+    return false;
   }
 
   /**
@@ -204,6 +234,10 @@ class BootstrapStackNotFoundInfo extends ToolkitInfo {
   }
 
   public get variant(): string {
+    throw new Error(this.errorMessage);
+  }
+
+  public get allowCrossAccountAssetPublishing(): boolean {
     throw new Error(this.errorMessage);
   }
 

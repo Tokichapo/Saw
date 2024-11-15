@@ -20,20 +20,13 @@ import { assertIsSuccessfulDeployStackResult, deployStack, DeployStackOptions } 
 import { NoBootstrapStackEnvironmentResources } from '../../lib/api/environment-resources';
 import { HotswapMode } from '../../lib/api/hotswap/common';
 import { tryHotswapDeployment } from '../../lib/api/hotswap-deployments';
+import { StringWithoutPlaceholders } from '../../lib/api/util/placeholders';
 import { setCI } from '../../lib/logging';
+import { createBranded } from '../../lib/util/type-brands';
 import { DEFAULT_FAKE_TEMPLATE, testStack } from '../util';
-import {
-  mockCloudFormationClient,
-  mockResolvedEnvironment,
-  MockSdk,
-  MockSdkProvider,
-  restoreSdkMocksToDefault,
-} from '../util/mock-sdk';
+import { mockCloudFormationClient, mockResolvedEnvironment, MockSdk, MockSdkProvider, restoreSdkMocksToDefault } from '../util/mock-sdk';
 
 jest.mock('../../lib/api/hotswap-deployments');
-jest.mock('../../lib/api/util/checks', () => ({
-  determineAllowCrossAccountAssetPublishing: jest.fn().mockResolvedValue(true),
-}));
 
 const FAKE_STACK = testStack({
   stackName: 'withouterrors',
@@ -108,10 +101,17 @@ function standardDeployStackArguments(): DeployStackOptions {
   const resolvedEnvironment = mockResolvedEnvironment();
   return {
     stack: FAKE_STACK,
-    sdk,
+    env: {
+      didAssumeRole: true,
+      isFallbackCredentials: false,
+      resolvedEnvironment,
+      sdk,
+      resources: new NoBootstrapStackEnvironmentResources(resolvedEnvironment, sdk),
+      replacePlaceholders(x: string | undefined): Promise<StringWithoutPlaceholders | undefined> {
+        return Promise.resolve(x ? createBranded(x) : undefined);
+      },
+    },
     sdkProvider,
-    resolvedEnvironment,
-    envResources: new NoBootstrapStackEnvironmentResources(resolvedEnvironment, sdk),
   };
 }
 
@@ -738,19 +738,16 @@ test('deploy not skipped if template did not change but tags changed', async () 
   });
 
   // WHEN
-  const resolvedEnvironment = mockResolvedEnvironment();
   await deployStack({
+    ...standardDeployStackArguments(),
     stack: FAKE_STACK,
-    sdk,
     sdkProvider,
-    resolvedEnvironment,
     tags: [
       {
         Key: 'Key',
         Value: 'NewValue',
       },
     ],
-    envResources: new NoBootstrapStackEnvironmentResources(resolvedEnvironment, sdk),
   });
 
   // THEN

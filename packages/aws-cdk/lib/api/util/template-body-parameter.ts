@@ -7,8 +7,9 @@ import * as fs from 'fs-extra';
 import { debug, error } from '../../logging';
 import { toYAML } from '../../serialize';
 import { AssetManifestBuilder } from '../../util/asset-manifest-builder';
+import { AssetsPublishedProof } from '../../util/asset-publishing';
 import { contentHash } from '../../util/content-hash';
-import { EnvironmentResources } from '../environment-resources';
+import { TargetEnvironment } from '../environment-access';
 
 export type TemplateBodyParameter = {
   TemplateBody?: string;
@@ -17,30 +18,34 @@ export type TemplateBodyParameter = {
 
 const LARGE_TEMPLATE_SIZE_KB = 50;
 
+type MakeBodyParameterResult =
+  | { type: 'direct'; param: TemplateBodyParameter }
+  | { type: 'upload'; addToManifest: (builder: AssetManifestBuilder) => TemplateBodyParameter };
+
 /**
  * Prepares the body parameter for +CreateChangeSet+.
  *
- * If the template is small enough to be inlined into the API call, just return
- * it immediately.
+ * If the template has already been uploaded to an asset bucket or the template
+ * is small enough to be inlined into the API call, returns a 'direct' type response
+ * with can go into the CloudFormation API call. The `_assetsPublishedProof` parameter
+ * exists to statically prove that `publishAssets` has been called already.
  *
- * Otherwise, add it to the asset manifest to get uploaded to the staging
- * bucket and return its coordinates. If there is no staging bucket, an error
- * is thrown.
- *
- * @param stack     the synthesized stack that provides the CloudFormation template
- * @param toolkitInfo information about the toolkit stack
+ * Otherwise, returns an object with an `addToManifest` function; call that with an `AssetManifestBuilder`
+ * (and publish the added artifacts!) to obtain the CloudFormation API call parameters.
+ * there is no staging bucket, an error is thrown.
  */
 export async function makeBodyParameter(
   stack: CloudFormationStackArtifact,
-  resolvedEnvironment: Environment,
-  assetManifest: AssetManifestBuilder,
-  resources: EnvironmentResources,
-  overrideTemplate?: any,
-): Promise<TemplateBodyParameter> {
+  env: TargetEnvironment,
+  _assetsPublishedProof: AssetsPublishedProof,
+  overrideTemplate?: unknown,
+): Promise<MakeBodyParameterResult> {
+
   // If the template has already been uploaded to S3, just use it from there.
   if (stack.stackTemplateAssetObjectUrl && !overrideTemplate) {
     return {
-      TemplateURL: await restUrlFromManifest(stack.stackTemplateAssetObjectUrl, resolvedEnvironment),
+      type: 'direct',
+      param: { TemplateURL: await restUrlFromManifest(stack.stackTemplateAssetObjectUrl, env.resolvedEnvironment) },
     };
   }
 
@@ -48,17 +53,16 @@ export async function makeBodyParameter(
   const templateJson = toYAML(overrideTemplate ?? stack.template);
 
   if (templateJson.length <= LARGE_TEMPLATE_SIZE_KB * 1024) {
-    return { TemplateBody: templateJson };
+    return { type: 'direct', param: { TemplateBody: templateJson } };
   }
 
-  const toolkitInfo = await resources.lookupToolkit();
+  const toolkitInfo = await env.resources.lookupToolkit();
   if (!toolkitInfo.found) {
     error(
       `The template for stack "${stack.displayName}" is ${Math.round(templateJson.length / 1024)}KiB. ` +
-        `Templates larger than ${LARGE_TEMPLATE_SIZE_KB}KiB must be uploaded to S3.\n` +
-        'Run the following command in order to setup an S3 bucket in this environment, and then re-deploy:\n\n',
-      chalk.blue(`\t$ cdk bootstrap ${resolvedEnvironment.name}\n`),
-    );
+      `Templates larger than ${LARGE_TEMPLATE_SIZE_KB}KiB must be uploaded to S3.\n` +
+      'Run the following command in order to setup an S3 bucket in this environment, and then re-deploy:\n\n',
+      chalk.blue(`\t$ cdk bootstrap ${env.resolvedEnvironment.name}\n`));
 
     throw new Error('Template too large to deploy ("cdk bootstrap" is required)');
   }
@@ -74,20 +78,22 @@ export async function makeBodyParameter(
     await fs.writeFile(templateFilePath, templateJson, { encoding: 'utf-8' });
   }
 
-  assetManifest.addFileAsset(
-    templateHash,
-    {
-      path: templateFile,
-    },
-    {
-      bucketName: toolkitInfo.bucketName,
-      objectKey: key,
-    },
-  );
+  return {
+    type: 'upload',
+    addToManifest(builder) {
+      builder.addFileAsset(templateHash, {
+        path: templateFile,
+      }, {
+        bucketName: toolkitInfo.bucketName,
+        objectKey: key,
+      });
 
-  const templateURL = `${toolkitInfo.bucketUrl}/${key}`;
-  debug('Storing template in S3 at:', templateURL);
-  return { TemplateURL: templateURL };
+      const templateURL = `${toolkitInfo.bucketUrl}/${key}`;
+      debug('Storing template in S3 at:', templateURL);
+      return { TemplateURL: templateURL };
+    },
+  };
+
 }
 
 /**

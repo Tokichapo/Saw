@@ -9,14 +9,16 @@ import {
   type Stack,
   type Tag,
 } from '@aws-sdk/client-cloudformation';
-import { AssetManifest, FileManifestEntry } from 'cdk-assets';
+import { AssetManifest, DestinationPattern, FileManifestEntry } from 'cdk-assets';
 import { StackStatus } from './cloudformation/stack-status';
 import { makeBodyParameter, TemplateBodyParameter } from './template-body-parameter';
 import { debug } from '../../logging';
 import { deserializeStructure } from '../../serialize';
 import { AssetManifestBuilder } from '../../util/asset-manifest-builder';
-import type { ICloudFormationClient, SdkProvider } from '../aws-auth';
-import type { Deployments } from '../deployments';
+import { AssetsPublishedProof, multipleAssetPublishedProof, publishAssets } from '../../util/asset-publishing';
+import { ICloudFormationClient, SdkProvider } from '../aws-auth';
+import { Deployments } from '../deployments';
+import { TargetEnvironment } from '../environment-access';
 
 export type ResourcesToImport = ResourceToImport[];
 export type ResourceIdentifierSummaries = ResourceIdentifierSummary[];
@@ -367,41 +369,45 @@ export async function createDiffChangeSet(
  *
  * This is used in the `uploadBodyParameterAndCreateChangeSet` function to find
  * all template asset files to build and publish.
- *
- * Returns a tuple of [AssetManifest, FileManifestEntry[]]
  */
-function templatesFromAssetManifestArtifact(
-  artifact: cxapi.AssetManifestArtifact,
-): [AssetManifest, FileManifestEntry[]] {
-  const assets: FileManifestEntry[] = [];
+function templatesFromAssetManifestArtifact(artifact: cxapi.AssetManifestArtifact): AssetManifest {
   const fileName = artifact.file;
   const assetManifest = AssetManifest.fromFile(fileName);
 
-  assetManifest.entries.forEach((entry) => {
+  return assetManifest.select(assetManifest.entries.flatMap((entry) => {
     if (entry.type === 'file') {
       const source = (entry as FileManifestEntry).source;
-      if (source.path && source.path.endsWith('.template.json')) {
-        assets.push(entry as FileManifestEntry);
+      if (source.path && (source.path.endsWith('.template.json'))) {
+        return [new DestinationPattern(entry.id.assetId, entry.id.destinationId)];
       }
     }
-  });
-  return [assetManifest, assets];
+    return [];
+  }));
 }
 
 async function uploadBodyParameterAndCreateChangeSet(
   options: PrepareChangeSetOptions,
 ): Promise<DescribeChangeSetCommandOutput | undefined> {
   try {
-    await uploadStackTemplateAssets(options.stack, options.deployments);
-    const env = await options.deployments.envs.accessStackForMutableStackOperations(options.stack);
+    const env = (await options.deployments.envs.accessStackForMutableStackOperations(options.stack));
+    const proof = await uploadStackTemplateAssets(options.stack, options.sdkProvider, env);
 
-    const bodyParameter = await makeBodyParameter(
-      options.stack,
-      env.resolvedEnvironment,
-      new AssetManifestBuilder(),
-      env.resources,
-      env.sdk,
-    );
+    let bodyParameter;
+    const bodyAction = await makeBodyParameter(options.stack, env, proof);
+    switch (bodyAction.type) {
+      case 'direct':
+        bodyParameter = bodyAction.param;
+        break;
+
+      case 'upload':
+        const builder = new AssetManifestBuilder();
+        bodyParameter = bodyAction.addToManifest(builder);
+        await publishAssets(builder.toManifest(options.stack.assembly.directory), options.sdkProvider, env.resolvedEnvironment, {
+          allowCrossAccount: await env.resources.allowCrossAccountAssetPublishing(),
+        });
+        break;
+    }
+
     const cfn = env.sdk.cloudFormation();
     const exists = (await CloudFormationStack.lookup(cfn, options.stack.stackName, false)).exists;
 
@@ -440,23 +446,18 @@ async function uploadBodyParameterAndCreateChangeSet(
  * asset manifest, because technically that is the only place that knows about
  * bucket and assumed roles and such.
  */
-export async function uploadStackTemplateAssets(stack: cxapi.CloudFormationStackArtifact, deployments: Deployments) {
-  for (const artifact of stack.dependencies) {
-    // Skip artifact if it is not an Asset Manifest Artifact
-    if (!cxapi.AssetManifestArtifact.isAssetManifestArtifact(artifact)) {
-      continue;
-    }
+export async function uploadStackTemplateAssets(
+  stack: cxapi.CloudFormationStackArtifact,
+  sdkProvider: SdkProvider,
+  env: TargetEnvironment,
+): Promise<AssetsPublishedProof> {
+  const assetDependencies = stack.dependencies.filter(cxapi.AssetManifestArtifact.isAssetManifestArtifact);
+  const allowCrossAccount = await env.resources.allowCrossAccountAssetPublishing();
 
-    const [assetManifest, file_entries] = templatesFromAssetManifestArtifact(artifact);
-    for (const entry of file_entries) {
-      await deployments.buildSingleAsset(artifact, assetManifest, entry, {
-        stack,
-      });
-      await deployments.publishSingleAsset(assetManifest, entry, {
-        stack,
-      });
-    }
-  }
+  return multipleAssetPublishedProof(assetDependencies, (artifact) => {
+    const templates = templatesFromAssetManifestArtifact(artifact);
+    return publishAssets(templates, sdkProvider, env.resolvedEnvironment, { allowCrossAccount });
+  });
 }
 
 async function createChangeSet(options: CreateChangeSetOptions): Promise<DescribeChangeSetCommandOutput> {
