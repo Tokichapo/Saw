@@ -26,6 +26,8 @@ import { data, debug, error, print, setCI, setLogLevel, LogLevel } from '../lib/
 import { Notices } from '../lib/notices';
 import { Command, Configuration, Settings } from '../lib/settings';
 import * as version from '../lib/version';
+import { SdkToCliLogger } from './api/aws-auth/sdk-logger';
+import { yargsNegativeAlias } from './util/yargs-helpers';
 
 /* eslint-disable max-len */
 /* eslint-disable @typescript-eslint/no-shadow */ // yargs
@@ -101,6 +103,7 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
       proxyAddress: argv.proxy,
       caBundlePath: argv['ca-bundle-path'],
     },
+    logger: new SdkToCliLogger(),
   });
 
   let outDirLock: ILock | undefined;
@@ -523,18 +526,6 @@ function arrayFromYargs(xs: string[]): string[] | undefined {
     return undefined;
   }
   return xs.filter((x) => x !== '');
-}
-
-function yargsNegativeAlias<T extends { [x in S | L]: boolean | undefined }, S extends string, L extends string>(
-  shortName: S,
-  longName: L,
-): (argv: T) => T {
-  return (argv: T) => {
-    if (shortName in argv && argv[shortName]) {
-      (argv as any)[longName] = false;
-    }
-    return argv;
-  };
 }
 
 function determineHotswapMode(hotswap?: boolean, hotswapFallback?: boolean, watch?: boolean): HotswapMode {
