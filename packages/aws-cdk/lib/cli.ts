@@ -221,7 +221,7 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
 
       case 'diff':
         const enableDiffNoFail = isFeatureEnabled(configuration, cxapi.ENABLE_DIFF_NO_FAIL_CONTEXT);
-        return cli.diff({
+        return cli.diff(cloudExecutable, {
           stackNames: args.STACKS,
           exclusively: args.exclusively,
           templatePath: args.template,
@@ -311,7 +311,7 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
             break;
         }
 
-        return cli.deploy({
+        return cli.deploy(cloudExecutable, {
           selector,
           exclusively: args.exclusively,
           toolkitStackName,
@@ -340,7 +340,7 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
         });
 
       case 'rollback':
-        return cli.rollback({
+        return cli.rollback(cloudExecutable, {
           selector,
           toolkitStackName,
           roleArn: args.roleArn,
@@ -350,7 +350,7 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
         });
 
       case 'import':
-        return cli.import({
+        return cli.import(cloudExecutable, {
           selector,
           toolkitStackName,
           roleArn: args.roleArn,
@@ -367,7 +367,7 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
         });
 
       case 'watch':
-        return cli.watch({
+        return cli.watch(cloudExecutable, {
           selector,
           exclusively: args.exclusively,
           toolkitStackName,
@@ -386,7 +386,7 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
         });
 
       case 'destroy':
-        return cli.destroy({
+        return cli.destroy(cloudExecutable, {
           selector,
           exclusively: args.exclusively,
           force: args.force,
@@ -398,7 +398,7 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
         if (!configuration.settings.get(['unstable']).includes('gc')) {
           throw new Error('Unstable feature use: \'gc\' is unstable. It must be opted in via \'--unstable\', e.g. \'cdk gc --unstable=gc\'');
         }
-        return cli.garbageCollect(args.ENVIRONMENTS, {
+        return cli.garbageCollect(cloudExecutable, args.ENVIRONMENTS, {
           action: args.action,
           type: args.type,
           rollbackBufferDays: args['rollback-buffer-days'],
@@ -410,18 +410,19 @@ export async function exec(args: string[], synthesizer?: Synthesizer): Promise<n
       case 'synthesize':
       case 'synth':
         const quiet = configuration.settings.get(['quiet']) ?? args.quiet;
-        if (args.exclusively) {
-          return cli.synth(args.STACKS, args.exclusively, quiet, args.validation, argv.json);
-        } else {
-          return cli.synth(args.STACKS, true, quiet, args.validation, argv.json);
-        }
+        return cli.synth(cloudExecutable, {
+          stackNames: args.STACKS,
+          exclusively: args.exclusively ?? false,
+          quiet,
+          json: argv.json,
+        });
 
       case 'notices':
         // This is a valid command, but we're postponing its execution
         return;
 
       case 'metadata':
-        return cli.metadata(args.STACK, argv.json);
+        return cli.metadata(cloudExecutable, args.STACK, argv.json);
 
       case 'acknowledge':
       case 'ack':

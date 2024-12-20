@@ -5,6 +5,7 @@ import * as semver from 'semver';
 import { error, print, warning } from '../../logging';
 import { flatten } from '../../util';
 import { versionNumber } from '../../version';
+import { ICloudAssemblySource } from '../../toolkit/cloud-assembly-source';
 
 export enum DefaultSelection {
   /**
@@ -89,7 +90,7 @@ export interface StackSelector {
 /**
  * A single Cloud Assembly and the operations we do on it to deploy the artifacts inside
  */
-export class CloudAssembly {
+export class CloudAssembly implements ICloudAssemblySource {
   /**
    * The directory this CloudAssembly was read from
    */
@@ -97,6 +98,10 @@ export class CloudAssembly {
 
   constructor(public readonly assembly: cxapi.CloudAssembly) {
     this.directory = assembly.directory;
+  }
+
+  public async produce(): Promise<cxapi.CloudAssembly> {
+    return this.assembly;
   }
 
   public async selectStacks(selector: StackSelector, options: SelectStacksOptions): Promise<StackCollection> {
