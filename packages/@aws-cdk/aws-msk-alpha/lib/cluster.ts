@@ -653,7 +653,7 @@ export class Cluster extends ClusterBase {
       );
     }
 
-    let clientAuthentication;
+    let clientAuthentication: CfnCluster.ClientAuthenticationProperty | undefined;
     if (props.clientAuthentication) {
       const { saslProps, tlsProps } = props.clientAuthentication;
       clientAuthentication = {
