@@ -1,0 +1,23 @@
+name: Trigger GitLab CI on Push or PR
+on:
+  push:
+    branches:
+      - '*'  # Trigger on push to any branch
+  pull_request:
+    types: [opened, synchronize, reopened]  # Trigger on PR open, synchronize (commit push), and reopen events
+jobs:
+  trigger-gitlab-ci:
+    name: Trigger GitLab CI Job
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout the code (required for GitLab to access it)
+      - name: Checkout code
+        uses: actions/checkout@v2
+      # Trigger GitLab CI Job using the GitHub Action from the marketplace
+      - name: Trigger GitLab CI Job
+        uses: appleboy/gitlab-ci-action@v1.3.0
+        with:
+          host: "https://gitlab.com"  # GitLab's cloud service, or use your own GitLab instance URL
+          token: ${{ secrets.GITLAB_TOKEN }}  # Your GitLab Personal Access Token (with api scope)
+          project_id: ${{ secrets.GITLAB_PROJECT_ID }}  # Your GitLab project ID (numeric ID from GitLab)
+          debug: true
